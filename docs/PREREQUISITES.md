@@ -59,6 +59,12 @@ tracked as a spike in the plan (phase 3).
 
 ## 4. Local tooling
 
-`kubectl`, `helm` (4.x), `git`, `curl`, `jq`, `python3`. No Docker or kind is
-needed unless a custom MCP image has to be built, which requires a container
-registry the cluster can pull from.
+`kubectl`, `helm` (4.x), `node` 18+, the `psql` client, `git`, `curl`, `jq`.
+No Docker or kind is needed unless a custom MCP image has to be built, which
+also requires a container registry the cluster can pull from.
+
+Also add the kubeconfig path to `.env`. `KUBECONFIG` is a plain filesystem
+path to the YAML file downloaded from the Infomaniak dashboard, not the file's
+contents and not base64. `KUBE_CONTEXT` is the context name inside it, from
+`kubectl --kubeconfig <path> config get-contexts`. The scripts pass `--context`
+on every call so they never act on the ambient current-context.
