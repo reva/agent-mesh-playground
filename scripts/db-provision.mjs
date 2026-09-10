@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Create the per-component databases decided in docs/DECISIONS.md, then print
- * the connection strings to paste into .env.
+ * Create the per-component databases decided in docs/DECISIONS.md and write
+ * their connection strings into .env.
  *
  * Idempotent: existing databases are left alone. Reads SUPABASE_DB_URL, which
- * must be the session pooler URL, and never prints a password.
+ * must be the session pooler URL. Passwords are written to .env, never printed:
+ * terminal scrollback and shell history are worse places for them.
  *
  * Usage:
  *   node scripts/db-provision.mjs [--vector] [--drop]
@@ -15,7 +16,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,30 @@ function urlFor(base, dbname, { mask = false } = {}) {
   return u.toString();
 }
 
+/** Set keys in .env, preserving comments and order. Returns false if there is no .env. */
+function updateEnv(updates) {
+  const file = join(ROOT, ".env");
+  if (!existsSync(file)) return false;
+
+  const lines = readFileSync(file, "utf8").split("\n");
+  const remaining = new Map(Object.entries(updates));
+
+  const rewritten = lines.map((line) => {
+    const match = line.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (!match) return line;
+    const key = match[2];
+    if (!remaining.has(key)) return line;
+    const value = remaining.get(key);
+    remaining.delete(key);
+    return `${match[1]}${key}=${value}`;
+  });
+
+  for (const [key, value] of remaining) rewritten.push(`${key}=${value}`);
+  writeFileSync(file, rewritten.join("\n"));
+  chmodSync(file, 0o600); // mode on writeFileSync is ignored for an existing file
+  return true;
+}
+
 async function exists(url, dbname) {
   const { ok, out } = await psql(url, `select 1 from pg_database where datname = '${dbname}'`);
   return ok && out.trim() === "1";
@@ -101,11 +126,17 @@ async function provision(url, vector) {
     }
   }
 
-  console.log(`\n${C.bold}Paste into .env:${C.reset}\n`);
+  // Written straight into .env rather than printed: these carry the password,
+  // and a terminal is a worse place for it than a git-ignored file.
+  const updates = Object.fromEntries(DATABASES.map((db) => [db.envVar, urlFor(url, db.name)]));
+  const written = updateEnv(updates);
+  console.log(`\n${C.bold}Wrote to .env:${C.reset}\n`);
   for (const db of DATABASES) {
-    console.log(`${db.envVar}=${urlFor(url, db.name)}`);
+    console.log(`  ${db.envVar}=${urlFor(url, db.name, { mask: true })}`);
   }
-  console.log(`\n${C.dim}Those carry the password. .env is git-ignored; keep them there.${C.reset}`);
+  if (!written) {
+    console.log(`\n${C.yellow}No .env found. Copy .env.example to .env and re-run.${C.reset}`);
+  }
 
   if (!vector) {
     console.log(`${C.dim}pgvector was not installed. Re-run with --vector before setting`);
