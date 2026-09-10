@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.state/
+bin/
+kubeconfig*
+*.log
+.DS_Store
