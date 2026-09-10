@@ -36,8 +36,10 @@ npm dependencies; Node is the task runner and the scripts shell out to
 `kubectl`, `helm` and `psql`.
 
 ```bash
-npm run db:spike          # probe the Supabase database (docs/PLAN.md phase 3)
-npm run db:spike -- --keep  # ...and leave the spike objects behind
+npm run db:spike              # probe the Supabase database, prove its properties
+npm run db:provision          # create the kagent and agentregistry databases
+npm run db:provision -- --vector   # ...and install pgvector in the kagent one
+npm run db:provision -- --drop     # remove them again, with a typed confirmation
 ```
 
 ## Credentials

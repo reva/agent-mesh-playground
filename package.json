@@ -8,6 +8,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "db:spike": "node scripts/db-spike.mjs"
+    "db:spike": "node scripts/db-spike.mjs",
+    "db:provision": "node scripts/db-provision.mjs"
   }
 }

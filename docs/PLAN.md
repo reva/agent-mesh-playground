@@ -85,33 +85,27 @@ Exit: `npm run preflight` passes against the real cluster.
 Exit: `npm run secrets` re-runnable, `kubectl get secret` shows the five
 secrets, no secret material in git.
 
-### Phase 3 - data layer (spike, then implement)
+### Phase 3 - data layer
 
-**Spike:** how do two components share one Supabase project without colliding?
-kagent and agentregistry both create their own tables. Options in order of
-preference:
+The spike is done; see `docs/DECISIONS.md` for the evidence. Outcome: one
+Supabase project, one database per component, reached through the session
+pooler on port 5432 with `sslmode=require`.
 
-1. Separate databases in the same project, selected via the database name in
-   the pooler connection string. Needs verification that Supavisor routes to a
-   non-`postgres` database.
-2. One database, one role and one schema per component, with
-   `?options=-csearch_path%3Dkagent` in the URL. Needs verification that
-   Supavisor forwards startup `options`.
-3. Separate Supabase projects. Always works, uses the second free project slot.
+Remaining work:
 
-Decide from the spike, record the outcome in `docs/DECISIONS.md`.
+- `scripts/db-provision.mjs`: create the `kagent` and `agentregistry`
+  databases, idempotently, and print the two connection strings to paste into
+  `.env`.
+- `create extension vector` in the kagent database if long term memory is
+  wanted, and set `database.postgres.vectorEnabled: true` to match. Off until
+  then.
+- Set `database.postgres.pool.maxConns` on kagent. The shared Supavisor pool
+  size is 15 in session mode and is the ceiling for everything, including any
+  `psql` session held open by hand.
+- Decide `sessionRetentionDays` so the playground does not grow without bound.
 
-**Implementation:**
-
-- `sql/` with the role, schema and grant statements actually used.
-- Enable the `vector` extension if kagent memory features are wanted, and set
-  `database.postgres.vectorEnabled: true` to match.
-- Tune `database.postgres.pool.maxConns` down. The free plan has a small
-  connection budget and every agent pod plus the controller opens a pool.
-- Decide on `sessionRetentionDays` so the playground does not grow unbounded.
-
-Exit: both components can create their tables against Supabase, verified by
-running the kagent migration alone before installing the rest.
+Exit: both components create their tables against Supabase, verified by running
+the kagent migration alone before installing the rest.
 
 ### Phase 4 - agentgateway and the OpenRouter path
 

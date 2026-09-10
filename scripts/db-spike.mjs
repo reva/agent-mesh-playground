@@ -109,10 +109,18 @@ async function checkConnectivity(url) {
         || E'\\nuser=' || current_user
         || E'\\nserver_addr=' || coalesce(host(inet_server_addr())::text, 'unset (pooler)')
         || E'\\nclient_addr=' || coalesce(host(inet_client_addr())::text, 'unset')
-        || E'\\nssl=' || coalesce((select ssl::text from pg_stat_ssl where pid = pg_backend_pid()), 'unknown')
   `);
   record("connect through the given URL", ok, out);
-  return ok;
+  if (!ok) return false;
+
+  // pg_stat_ssl would describe the pooler's link to Postgres, not ours, so ask
+  // the client instead.
+  const info = await psql(url, "\\conninfo");
+  const tls = info.out.match(/SSL connection \(protocol: ([^,)]+)/);
+  record("client connection is encrypted", Boolean(tls),
+    tls ? tls[1] : info.out || "no SSL line in \\conninfo",
+    tls ? "" : "Add ?sslmode=require to the URL.");
+  return true;
 }
 
 /** Can an IPv4-only host, such as a cluster node, resolve this hostname at all? */
@@ -163,7 +171,7 @@ async function checkPoolerMode(url, isPooler) {
 }
 
 async function checkLimits(url) {
-  section("3. Connection budget");
+  section("3. Connection budget (database side)");
   const { ok, out } = await psql(url, `
     select 'max_connections=' || current_setting('max_connections')
         || E'\\nin_use=' || (select count(*) from pg_stat_activity)::text
@@ -174,8 +182,26 @@ async function checkLimits(url) {
          "plus agent pods stay well under this." : "");
 }
 
+/**
+ * In session mode each client connection holds a backend for its lifetime, so
+ * the pooler's client limit, not the database's max_connections, is what the
+ * controller and agent pods are really competing for.
+ */
+async function checkConcurrency(url, attempts = 25) {
+  section("4. Concurrent session-mode connections");
+  const settled = await Promise.all(
+    Array.from({ length: attempts }, () => psql(url, "select pg_sleep(2)", 40000)),
+  );
+  const ok = settled.filter((r) => r.ok).length;
+  const firstError = settled.find((r) => !r.ok);
+  record(`hold ${attempts} connections at once`, ok === attempts,
+    `succeeded=${ok} / ${attempts}` + (firstError ? `\nfirst error: ${firstError.out}` : ""),
+    `The whole stack has to fit in this. One pool per agent pod plus the ` +
+    `controller, so keep pool.maxConns small and the agent count low.`);
+}
+
 async function checkPgvector(url) {
-  section("4. pgvector");
+  section("5. pgvector");
   const { ok, out } = await psql(url, `
     select coalesce(
         (select 'installed, version ' || extversion from pg_extension where extname = 'vector'),
@@ -190,7 +216,7 @@ async function checkPgvector(url) {
 }
 
 async function checkSeparateDatabase(url, keep, isPooler) {
-  section("5. Option 1 - separate database per component");
+  section("6. Option 1 - separate database per component");
   if (!isPooler) {
     console.log(`  ${C.yellow}Direct connection: this proves Postgres allows it, not that`);
     console.log(`  Supavisor routes there. Re-run against the pooler to decide.${C.reset}\n`);
@@ -230,14 +256,16 @@ async function checkSeparateDatabase(url, keep, isPooler) {
   }
 
   if (!keep) {
-    const drop = await psql(url, `drop database if exists "${SPIKE_DB}"`);
+    // Supavisor holds a pooled backend on the database, so a plain DROP loses a
+    // race against it reconnecting.
+    const drop = await psql(url, `drop database if exists "${SPIKE_DB}" with (force)`);
     if (!drop.ok) console.log(`  ${C.yellow}cleanup: could not drop ${SPIKE_DB}: ${drop.out}${C.reset}\n`);
   }
   return routed.ok;
 }
 
 async function checkSearchPath(url, keep, isPooler) {
-  section("6. Option 2 - one database, schema per component");
+  section("7. Option 2 - one database, schema per component");
   if (!isPooler) {
     console.log(`  ${C.yellow}Direct connection: startup options always survive here.`);
     console.log(`  Only a pooler run shows whether Supavisor forwards them.${C.reset}\n`);
@@ -335,6 +363,7 @@ async function main() {
   const isPooler = new URL(url).hostname.includes("pooler.supabase.com");
   await checkPoolerMode(url, isPooler);
   await checkLimits(url);
+  await checkConcurrency(url);
   await checkPgvector(url);
   const sepDbOk = await checkSeparateDatabase(url, keep, isPooler);
   const schemaOk = await checkSearchPath(url, keep, isPooler);
