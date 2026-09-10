@@ -1,8 +1,8 @@
 # Implementation plan
 
 Goal: a long-lived agent playground on a remote cluster, deployable and
-re-deployable from a laptop with `make setup`, using free or near-free managed
-services. The local workshop repo `ch-open/agent-mesh-setup` is the functional
+re-deployable from a laptop with `npm run setup`, using free or near-free
+managed services. The local workshop repo `ch-open/agent-mesh-setup` is the functional
 reference; this repo differs in that the cluster, the database and the ingress
 path are real rather than local.
 
@@ -57,21 +57,23 @@ Exit: `kubectl --context $KUBE_CONTEXT get nodes` lists Ready nodes and
 
 ### Phase 1 - repo scaffolding and preflight
 
-- `Makefile` with `preflight`, `secrets`, `setup`, `status`, `open`, `teardown`.
-- `scripts/lib.sh`: `.env` loading, context pinning (every kubectl call carries
-  `--context`, never the ambient current-context), `die`/`need` helpers.
-- `scripts/preflight.sh`: required binaries, cluster reachability, node
+- `package.json` scripts as the entrypoint: `preflight`, `secrets`, `setup`,
+  `status`, `open`, `teardown`, `db:spike`. No dependencies, no build step.
+- `scripts/lib.mjs`: `.env` loading, a `kubectl`/`helm` wrapper that always
+  passes `--context $KUBE_CONTEXT` so nothing can act on the ambient
+  current-context, and small run/log helpers.
+- `scripts/preflight.mjs`: required binaries, cluster reachability, node
   capacity, presence of a default StorageClass, whether the Gateway API CRDs
   are already installed, and a reachability probe against both database URLs.
 
-Exit: `make preflight` passes against the real cluster.
+Exit: `npm run preflight` passes against the real cluster.
 
 ### Phase 2 - cluster baseline
 
 - Install Gateway API 1.6.0 standard CRDs (server-side apply).
 - `manifests/namespaces.yaml`: `playground` plus labels; the component charts
   create their own namespaces.
-- `scripts/secrets.sh` creates, from `.env`:
+- `scripts/secrets.mjs` creates, from `.env`:
   - `agentgateway-system/openrouter-api-key` with the real key
   - `kagent/kagent-gateway-client` and `playground/kagent-gateway-client` with
     a placeholder value
@@ -80,8 +82,8 @@ Exit: `make preflight` passes against the real cluster.
   The script is idempotent (`create --dry-run=client | apply`) and is the only
   place secrets enter the cluster.
 
-Exit: `make secrets` re-runnable, `kubectl get secret` shows the five secrets,
-no secret material in git.
+Exit: `npm run secrets` re-runnable, `kubectl get secret` shows the five
+secrets, no secret material in git.
 
 ### Phase 3 - data layer (spike, then implement)
 
@@ -168,7 +170,7 @@ tool, with the call visible in the gateway.
 
 ### Phase 8 - access
 
-Default: **no public exposure.** `make open` starts port-forwards for the
+Default: **no public exposure.** `npm run open` starts port-forwards for the
 kagent UI, the registry UI, the gateway UI and the gateway MCP endpoint, the
 same as the workshop repo. This costs nothing and avoids putting an
 unauthenticated UI on the internet.
@@ -192,9 +194,9 @@ Exit: documented, disabled by default, with the cost of enabling it stated.
 
 ### Phase 9 - operations
 
-- `scripts/status.sh`: pods per namespace, Gateway and route status, kagent
+- `scripts/status.mjs`: pods per namespace, Gateway and route status, kagent
   CRs, database reachability.
-- `scripts/teardown.sh`: uninstall releases, optionally drop the database
+- `scripts/teardown.mjs`: uninstall releases, optionally drop the database
   content, require an explicit confirmation flag.
 - Cost control: document scaling the node pool to zero, and that Supabase
   pauses the project when idle.

@@ -25,14 +25,23 @@ the accounts and credentials to prepare.
 
 ```
 docs/          plan, prerequisites, pinned versions, decisions
-scripts/       bash entrypoints driven by the Makefile
+scripts/       node entrypoints, run through npm scripts
 helm/          values files per component
 manifests/     namespaces, Gateway, routes, sample agents
 examples/      sample agent, sample MCP server
 ```
 
+Everything runs through `package.json` scripts. There is no build step and no
+npm dependencies; Node is the task runner and the scripts shell out to
+`kubectl`, `helm` and `psql`.
+
+```bash
+npm run db:spike          # probe the Supabase database (docs/PLAN.md phase 3)
+npm run db:spike -- --keep  # ...and leave the spike objects behind
+```
+
 ## Credentials
 
 All secrets live in a local, git-ignored `.env` and are pushed into the cluster
-as Kubernetes Secrets by `scripts/secrets.sh`. Nothing secret is committed.
+as Kubernetes Secrets by `scripts/secrets.mjs`. Nothing secret is committed.
 Copy `.env.example` to `.env` to start.

@@ -17,6 +17,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { Resolver } from "node:dns/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,16 +115,40 @@ async function checkConnectivity(url) {
   return ok;
 }
 
-async function checkPoolerMode(url) {
-  section("2. Pooler mode");
+/** Can an IPv4-only host, such as a cluster node, resolve this hostname at all? */
+async function resolveHost(hostname) {
+  const resolver = new Resolver();
+  const lookup = async (fn) => {
+    try {
+      return await fn.call(resolver, hostname);
+    } catch (err) {
+      return err.code === "ENODATA" || err.code === "ENOTFOUND" ? [] : [`error: ${err.code}`];
+    }
+  };
+  return {
+    v4: await lookup(resolver.resolve4),
+    v6: await lookup(resolver.resolve6),
+  };
+}
+
+async function checkPoolerMode(url, isPooler) {
+  section("2. Reachability and pooler mode");
   const u = new URL(url);
   const port = u.port || "5432";
-  const isPooler = u.hostname.includes("pooler.supabase.com");
+
+  const { v4, v6 } = await resolveHost(u.hostname);
+  const reachableFromIpv4 = v4.length > 0;
+  record("hostname has an IPv4 address", reachableFromIpv4,
+    `A     = ${v4.length ? v4.join(", ") : "none"}\nAAAA  = ${v6.length ? v6.join(", ") : "none"}`,
+    reachableFromIpv4
+      ? "An IPv4-only cluster node can reach this host."
+      : "IPv6 only. An IPv4-only cluster node cannot reach this host at all, " +
+        "however well it works from a laptop with IPv6. Use the session pooler.");
 
   if (!isPooler) {
     record("host is the shared pooler", false, `host=${u.hostname}`,
-      "Direct connections are IPv6-only on the free plan. Cluster pods will very " +
-      "likely fail to reach this. Use the session pooler host instead.");
+      "This is the direct connection. Tests 5 and 6 below talk straight to Postgres " +
+      "and therefore say nothing about how Supavisor behaves.");
   } else {
     const mode = port === "5432" ? "session" : port === "6543" ? "transaction" : `unknown (port ${port})`;
     record("host is the shared pooler", true, `host=${u.hostname} port=${port} mode=${mode}`,
@@ -164,8 +189,12 @@ async function checkPgvector(url) {
       ? "Set database.postgres.vectorEnabled=true only once this reports installed." : "");
 }
 
-async function checkSeparateDatabase(url, keep) {
+async function checkSeparateDatabase(url, keep, isPooler) {
   section("5. Option 1 - separate database per component");
+  if (!isPooler) {
+    console.log(`  ${C.yellow}Direct connection: this proves Postgres allows it, not that`);
+    console.log(`  Supavisor routes there. Re-run against the pooler to decide.${C.reset}\n`);
+  }
 
   const exists = await psql(url, `select 1 from pg_database where datname = '${SPIKE_DB}'`);
   let created = exists.ok && exists.out.trim() === "1";
@@ -181,10 +210,14 @@ async function checkSeparateDatabase(url, keep) {
 
   const spikeUrl = withDatabase(url, SPIKE_DB);
   const routed = await psql(spikeUrl, "select current_database()");
-  record("pooler routes to the non-default database", routed.ok, routed.out,
-    routed.ok
-      ? "Option 1 works: give kagent and agentregistry one database each."
-      : "Supavisor did not route there. This is the expected failure mode; fall back to option 2.");
+  record(isPooler ? "pooler routes to the non-default database"
+                  : "connection reaches the non-default database (direct, not via pooler)",
+    routed.ok, routed.out,
+    !isPooler
+      ? "Inconclusive for the deployment. Supavisor may pin the tenant to its own database."
+      : routed.ok
+        ? "Option 1 works: give kagent and agentregistry one database each."
+        : "Supavisor did not route there. This is the expected failure mode; fall back to option 2.");
 
   if (routed.ok) {
     const ddl = await psql(spikeUrl, `
@@ -203,8 +236,12 @@ async function checkSeparateDatabase(url, keep) {
   return routed.ok;
 }
 
-async function checkSearchPath(url, keep) {
+async function checkSearchPath(url, keep, isPooler) {
   section("6. Option 2 - one database, schema per component");
+  if (!isPooler) {
+    console.log(`  ${C.yellow}Direct connection: startup options always survive here.`);
+    console.log(`  Only a pooler run shows whether Supavisor forwards them.${C.reset}\n`);
+  }
 
   const schema = await psql(url, `create schema if not exists "${SPIKE_SCHEMA}"`);
   record("can create a schema", schema.ok, schema.out || "created");
@@ -213,11 +250,15 @@ async function checkSearchPath(url, keep) {
   const spUrl = withQuery(url, "options", `-csearch_path=${SPIKE_SCHEMA}`);
   const sp = await psql(spUrl, "show search_path");
   const forwarded = sp.ok && sp.out.includes(SPIKE_SCHEMA);
-  record("pooler forwards startup options=-csearch_path", forwarded, sp.out,
-    forwarded
-      ? "Option 2 works: one role and schema per component, search_path in the URL."
-      : "The pooler dropped the startup option. Only per-role " +
-        "'alter role ... set search_path' or separate projects remain.");
+  record(isPooler ? "pooler forwards startup options=-csearch_path"
+                  : "server accepts startup options=-csearch_path (direct, not via pooler)",
+    forwarded, sp.out,
+    !isPooler
+      ? "Inconclusive for the deployment. Supavisor rewrites the startup packet."
+      : forwarded
+        ? "Option 2 works: one role and schema per component, search_path in the URL."
+        : "The pooler dropped the startup option. Only per-role " +
+          "'alter role ... set search_path' or separate projects remain.");
 
   const role = await psql(url, `
     do $$ begin
@@ -237,8 +278,21 @@ async function checkSearchPath(url, keep) {
   return forwarded;
 }
 
-function summarise(sepDbOk, schemaOk) {
+function summarise(sepDbOk, schemaOk, isPooler) {
   section("Recommendation");
+  if (!isPooler) {
+    console.log("  No recommendation yet. This run used the direct connection, which");
+    console.log("  bypasses Supavisor, so the two separation options are untested for");
+    console.log("  how they will actually be deployed. Put the session pooler URL in");
+    console.log("  SUPABASE_DB_URL and run again.\n");
+    const failedDirect = results.filter((r) => !r.ok).map((r) => r.name);
+    if (failedDirect.length) {
+      console.log(`  ${C.yellow}Checks that failed:${C.reset}`);
+      for (const name of failedDirect) console.log(`    - ${name}`);
+      console.log();
+    }
+    return;
+  }
   if (sepDbOk) {
     console.log("  Separate databases in one Supabase project. Cleanest separation,");
     console.log("  no search_path trickery, both components keep their own migrations.\n");
@@ -278,12 +332,13 @@ async function main() {
     console.error("Cannot connect. Nothing else can be tested.");
     process.exit(1);
   }
-  await checkPoolerMode(url);
+  const isPooler = new URL(url).hostname.includes("pooler.supabase.com");
+  await checkPoolerMode(url, isPooler);
   await checkLimits(url);
   await checkPgvector(url);
-  const sepDbOk = await checkSeparateDatabase(url, keep);
-  const schemaOk = await checkSearchPath(url, keep);
-  summarise(sepDbOk, schemaOk);
+  const sepDbOk = await checkSeparateDatabase(url, keep, isPooler);
+  const schemaOk = await checkSearchPath(url, keep, isPooler);
+  summarise(sepDbOk, schemaOk, isPooler);
 }
 
 main().catch((err) => {

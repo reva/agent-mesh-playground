@@ -25,3 +25,30 @@ an Octavia load balancer.
 
 Whether kagent and agentregistry get separate databases, separate schemas in
 one database, or separate projects. Decided by the phase 3 spike.
+
+First spike run, 2026-09-10, against the **direct** connection. Established
+facts about the database itself:
+
+- PostgreSQL 17.6, TLS enforced.
+- `max_connections` is 60, with 12 already in use and 3 reserved for
+  superusers. Roughly 45 are available to the stack, so `pool.maxConns` has to
+  be capped well below the pgx default of `max(4, NumCPU)` per pod.
+- `vector` 0.8.2 is available but not installed. `vectorEnabled` stays false
+  until someone runs `create extension vector`.
+- The `postgres` role can `CREATE DATABASE`, and server-side prepared
+  statements work.
+- `db.<ref>.supabase.co` publishes **no A record**, only AAAA. Not a docs
+  claim, a resolver result. An IPv4-only cluster node cannot reach it, so the
+  direct connection is unusable from Infomaniak regardless of anything else.
+
+The separation question is still open: the direct connection bypasses
+Supavisor, so it cannot show whether the pooler routes to a second database or
+forwards a startup `search_path`. Needs a second run against the session
+pooler URL.
+
+## 2026-09-10 - npm scripts as the task runner, Node for the scripts
+
+`package.json` scripts instead of a Makefile, and `.mjs` instead of bash or
+Python for the entrypoints. No dependencies and no build step: Node is only
+the runner, and the scripts shell out to `kubectl`, `helm` and `psql`. Make
+solves incremental rebuilds, which this repo does not have.

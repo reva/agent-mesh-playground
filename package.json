@@ -1,0 +1,13 @@
+{
+  "name": "agent-mesh-playground",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "kagent, agentgateway and agentregistry on Infomaniak Kubernetes with Supabase and OpenRouter",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "db:spike": "node scripts/db-spike.mjs"
+  }
+}
