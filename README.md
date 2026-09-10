@@ -1,60 +1,47 @@
 # agent-mesh-playground
 
-A persistent agent playground running the solo.io Agent Mesh components on a
-hosted Kubernetes cluster:
+[kagent](https://kagent.dev) on Infomaniak Kubernetes, with Supabase Postgres
+and OpenRouter. Deployed from a laptop.
 
-- **kagent** - agent runtime and UI, Agent/ModelConfig/RemoteMCPServer CRDs
-- **agentgateway** - Gateway API data plane for MCP and model traffic
-- **agentregistry** - catalog for Skills and MCP servers
-
-Unlike the local workshop setup this is built around managed, mostly free
-infrastructure:
-
-| Concern | Choice |
-|---|---|
-| Kubernetes | Infomaniak Public Cloud, shared (free) control plane |
-| Database | Supabase Postgres, shared pooler in session mode |
-| Model access | OpenRouter, brokered through agentgateway |
-| Deployment | Run locally from this repo against the remote cluster |
-
-Status: kagent is deployed and working. agentgateway and agentregistry are not,
-because the current node pool is one 1 vCPU / 2 GB node and would not fit them.
-While the gateway is absent kagent calls OpenRouter directly, so the provider
-key sits in the kagent namespace rather than being brokered.
+## Use
 
 ```bash
-kubectl --context $KUBE_CONTEXT -n kagent port-forward svc/kagent-ui 8082:8080
+./scripts/up.sh                        # deploy, then port-forward the UI
+./scripts/ask.sh "what is kubernetes?" # one message, one answer
+./scripts/down.sh                      # remove it again, databases kept
 ```
 
-then http://127.0.0.1:8082. The `hello` agent in `examples/hello-agent.yaml` is
-a smoke test for the model path.
+UI: http://127.0.0.1:8082 once `up.sh` has run.
 
-See [docs/PLAN.md](docs/PLAN.md) for the remaining phases and
-[docs/PREREQUISITES.md](docs/PREREQUISITES.md) for the accounts involved.
+`ask.sh` takes an optional second argument to pick an agent, default `hello`.
 
-## Repository layout (target)
-
-```
-docs/          plan, prerequisites, pinned versions, decisions
-scripts/       node entrypoints, run through npm scripts
-helm/          values files per component
-manifests/     namespaces, Gateway, routes, sample agents
-examples/      sample agent, sample MCP server
-```
-
-Everything runs through `package.json` scripts. There is no build step and no
-npm dependencies; Node is the task runner and the scripts shell out to
-`kubectl`, `helm` and `psql`.
+## Setup
 
 ```bash
-npm run db:spike              # probe the Supabase database, prove its properties
-npm run db:provision          # create the kagent and agentregistry databases
-npm run db:provision -- --vector   # ...and install pgvector in the kagent one
-npm run db:provision -- --drop     # remove them again, with a typed confirmation
+cp .env.example .env               # then fill it in
+npm run db:spike                   # check the Supabase database is usable
+npm run db:provision -- --vector   # create the databases, write their URLs to .env
+./scripts/up.sh
 ```
 
-## Credentials
+[docs/PREREQUISITES.md](docs/PREREQUISITES.md) covers the cluster, the Supabase
+project and the OpenRouter key. `.env` holds every secret and is git-ignored.
 
-All secrets live in a local, git-ignored `.env` and are pushed into the cluster
-as Kubernetes Secrets by `scripts/secrets.mjs`. Nothing secret is committed.
-Copy `.env.example` to `.env` to start.
+## Layout
+
+```
+scripts/      up, down, ask, plus the database helpers
+helm/         kagent values
+manifests/    gateway config, not deployed yet
+examples/     the hello agent
+docs/         plan, decisions, pinned versions
+```
+
+## State
+
+kagent only. agentgateway and agentregistry are configured but not deployed:
+the node pool is one 1 vCPU / 2 GB node and cannot fit them. While the gateway
+is absent, kagent calls OpenRouter directly and holds the key itself.
+
+[docs/PLAN.md](docs/PLAN.md) has the remaining phases,
+[docs/DECISIONS.md](docs/DECISIONS.md) why things are the way they are.
