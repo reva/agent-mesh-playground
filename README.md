@@ -8,6 +8,7 @@ and OpenRouter. Deployed from a laptop.
 ```bash
 ./scripts/up.sh                        # deploy, then port-forward the UI
 ./scripts/ask.sh "what is kubernetes?" # one message, one answer
+npm run refine -- --dry-run            # what the issue refiner would pick up
 ./scripts/down.sh                      # remove it again, databases kept
 ```
 
@@ -30,12 +31,24 @@ project and the OpenRouter key. `.env` holds every secret and is git-ignored.
 ## Layout
 
 ```
-scripts/      up, down, ask, plus the database helpers
+scripts/      up, down, ask, refine, plus the database helpers
 helm/         kagent values
-manifests/    gateway config, not deployed yet
-examples/     the hello agent
-docs/         plan, decisions, pinned versions
+agents/       the issue refiner
+manifests/    the refiner CronJob, and gateway config that is not deployed yet
+examples/     the hello agent, and issues to open during a demo
+docs/         plan, decisions, demo script, pinned versions
 ```
+
+## The issue refiner
+
+The one agent here that does a job rather than proving the wiring. Someone opens
+a thin bug report; a minute later it has a comment with the duplicates checked
+and the named file actually read. A CronJob polls the tracker, so nothing
+triggers it by hand.
+
+Set `GITHUB_REPO` and `GITHUB_TOKEN` in `.env` and `up.sh` deploys it. Leave
+them empty and it does not. [docs/DEMO.md](docs/DEMO.md) has the run-through and
+what the token needs.
 
 ## State
 
@@ -45,3 +58,7 @@ is absent, kagent calls OpenRouter directly and holds the key itself.
 
 [docs/PLAN.md](docs/PLAN.md) has the remaining phases,
 [docs/DECISIONS.md](docs/DECISIONS.md) why things are the way they are.
+
+The refiner runs on this footprint because it adds one agent pod and one
+short-lived CronJob pod. Its MCP servers are GitHub's hosted ones, so no MCP
+server runs in the cluster.

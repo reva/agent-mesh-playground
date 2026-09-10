@@ -18,6 +18,22 @@ helm upgrade --install kagent oci://ghcr.io/kagent-dev/kagent/helm/kagent \
   --kube-context "$KUBE_CONTEXT" --version 0.10.0 -n kagent -f helm/kagent-values.yaml --wait --timeout 10m >/dev/null
 
 k apply -f examples/hello-agent.yaml >/dev/null
+
+# The issue refiner is optional. No GitHub settings in .env, no refiner.
+if [[ -n "${GITHUB_REPO:-}" && -n "${GITHUB_TOKEN:-}" ]]; then
+  # Two keys for one token: the MCP servers send a header, the poll script
+  # calls the GitHub API directly.
+  k -n kagent create secret generic refiner-github \
+    --from-literal=authorization="Bearer $GITHUB_TOKEN" \
+    --from-literal=token="$GITHUB_TOKEN" --dry-run=client -o yaml | k apply -f - >/dev/null
+  k -n kagent create configmap refiner \
+    --from-file=poll.mjs=scripts/refiner-poll.mjs \
+    --from-literal=GITHUB_REPO="$GITHUB_REPO" --dry-run=client -o yaml | k apply -f - >/dev/null
+  k apply -f agents/refiner.yaml >/dev/null
+  k apply -f manifests/refiner-cron.yaml >/dev/null
+  echo "Refiner watching $GITHUB_REPO."
+fi
+
 k -n kagent rollout status deploy/kagent-ui --timeout=5m
 
 pkill -f "port-forward.*kagent-ui" 2>/dev/null || true

@@ -1,0 +1,55 @@
+# The refiner runs because issues exist, not because anyone asked it to.
+#
+# It polls rather than taking a webhook: the cluster has no inbound path, by the
+# decision in docs/DECISIONS.md, and adding one costs a load balancer. Polling
+# is outbound only. A minute of latency is not visible in this use case.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: refiner-poll
+  namespace: kagent
+  labels: {app.kubernetes.io/part-of: agent-mesh-playground}
+spec:
+  schedule: "* * * * *"
+  # A run that overruns its minute keeps the slot instead of stacking up.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Three issues at up to five minutes each, plus room to give up.
+      activeDeadlineSeconds: 1200
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: poll
+              image: node:22-alpine
+              command: [node, /opt/refiner/poll.mjs]
+              env:
+                - name: GITHUB_REPO
+                  valueFrom: {configMapKeyRef: {name: refiner, key: GITHUB_REPO}}
+                - name: GITHUB_TOKEN
+                  valueFrom: {secretKeyRef: {name: refiner-github, key: token}}
+                # The blast radius of a bad run, in one place. Three comments.
+                - {name: REFINER_MAX_ISSUES, value: "3"}
+                - {name: REFINER_MAX_AGE_DAYS, value: "7"}
+                - {name: REFINER_SKIP_LABEL, value: no-refine}
+              volumeMounts:
+                - {name: script, mountPath: /opt/refiner, readOnly: true}
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {cpu: 200m, memory: 128Mi}
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+          volumes:
+            - name: script
+              configMap:
+                name: refiner
+                # Project the script alone; the ConfigMap also holds settings.
+                items: [{key: poll.mjs, path: poll.mjs}]

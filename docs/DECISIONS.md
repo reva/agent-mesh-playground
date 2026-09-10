@@ -84,3 +84,47 @@ key itself and its ModelConfig points at `https://openrouter.ai/api/v1`.
 `manifests/gateway.yaml` still holds the brokered configuration. Restoring it
 means a bigger node pool, applying that manifest, and pointing the ModelConfig
 back at the in-cluster gateway.
+
+## 2026-09-10 - the refiner polls, and is not triggered
+
+A tracker would push a webhook, which is the right shape and needs an inbound
+path this cluster does not have. Adding one means ingress-nginx, an Octavia load
+balancer, a DNS record and a certificate, against the "no public exposure"
+decision above.
+
+So a CronJob polls from inside the cluster, outbound only. A minute of latency
+does not matter for issue refinement. A `cloudflared` pod would give real
+webhooks without a load balancer and is the upgrade path if the latency ever
+does matter, at the cost of a live inbound tunnel.
+
+Rejected: a `needs-refinement` label as the trigger. An agent that waits to be
+poked is a CLI with extra steps, and the point of running it in the cluster is
+that it reacts on its own. The label survives inverted, as `no-refine`, so one
+issue can opt out.
+
+## 2026-09-10 - the poll picks the issues, the agent refines one
+
+`scripts/refiner-poll.mjs` decides what is pending and calls the agent once per
+issue. It would have been fewer moving parts to tell the agent "find issues that
+need refining and refine them" in one turn.
+
+An unattended loop needs an idempotency rule that does not depend on the model.
+The rule is that an issue is pending when the token's own account has not
+commented on it, which is true regardless of what the model wrote. A marker line
+in the comment body would have worked too, and would have failed silently the
+first time the model omitted it.
+
+It also bounds the work: one issue in, one comment out, and a run touches at
+most `REFINER_MAX_ISSUES` issues.
+
+## 2026-09-10 - two MCP servers so the tool list is the permission model
+
+The refiner reads repository content through
+`api.githubcopilot.com/mcp/x/repos/readonly` and writes comments through
+`api.githubcopilot.com/mcp/x/issues`. Splitting them means repository access has
+no write tool at the transport, not merely an unlisted one.
+
+Within the issues server, `toolNames` grants `add_issue_comment` and withholds
+`issue_write`, so the agent cannot edit a body, title or label. Underneath both,
+the PAT is fine-grained to the one repository. Three layers, each of which can
+be read off a single file.

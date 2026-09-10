@@ -9,6 +9,7 @@
   },
   "scripts": {
     "db:spike": "node scripts/db-spike.mjs",
-    "db:provision": "node scripts/db-provision.mjs"
+    "db:provision": "node scripts/db-provision.mjs",
+    "refine": "scripts/refine.sh"
   }
 }
