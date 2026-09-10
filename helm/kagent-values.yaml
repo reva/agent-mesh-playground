@@ -1,0 +1,64 @@
+# External Supabase Postgres, reached through the session pooler.
+# The URL is mounted from the kagent-database Secret rather than set as a Helm
+# value, so it stays out of the release manifest.
+database:
+  postgres:
+    bundled:
+      enabled: false
+    urlFile: /etc/kagent-db/url
+    vectorEnabled: true
+    # Supavisor allows 15 concurrent session-mode clients for the whole project.
+    # See docs/DECISIONS.md.
+    pool:
+      maxConns: 5
+      minConns: 1
+
+# OpenRouter directly, because agentgateway is not deployed yet. That puts the
+# provider key in this namespace rather than behind the gateway; manifests/
+# gateway.yaml holds the brokered setup for when the node pool can carry it.
+providers:
+  default: openAI
+  openAI:
+    provider: OpenAI
+    model: z-ai/glm-5.3
+    apiKeySecretRef: kagent-openrouter
+    apiKeySecretKey: OPENAI_API_KEY
+    config:
+      apiFormat: chatCompletions
+      baseUrl: https://openrouter.ai/api/v1
+      timeout: 120
+
+controller:
+  replicas: 1
+  volumes:
+    - name: kagent-db
+      secret:
+        secretName: kagent-database
+  volumeMounts:
+    - name: kagent-db
+      mountPath: /etc/kagent-db
+      readOnly: true
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 750m, memory: 512Mi}
+
+ui:
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+kmcp: {enabled: true}
+
+# Built-in agents off: each one is another pod on a small node pool.
+kagent-tools: {enabled: false}
+grafana-mcp: {enabled: false}
+k8s-agent: {enabled: false}
+kgateway-agent: {enabled: false}
+istio-agent: {enabled: false}
+promql-agent: {enabled: false}
+observability-agent: {enabled: false}
+argo-rollouts-agent: {enabled: false}
+helm-agent: {enabled: false}
+cilium-policy-agent: {enabled: false}
+cilium-manager-agent: {enabled: false}
+cilium-debug-agent: {enabled: false}

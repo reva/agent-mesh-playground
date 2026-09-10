@@ -17,9 +17,20 @@ infrastructure:
 | Model access | OpenRouter, brokered through agentgateway |
 | Deployment | Run locally from this repo against the remote cluster |
 
-Status: planning. Nothing is deployed yet. See [docs/PLAN.md](docs/PLAN.md) for
-the implementation plan and [docs/PREREQUISITES.md](docs/PREREQUISITES.md) for
-the accounts and credentials to prepare.
+Status: kagent is deployed and working. agentgateway and agentregistry are not,
+because the current node pool is one 1 vCPU / 2 GB node and would not fit them.
+While the gateway is absent kagent calls OpenRouter directly, so the provider
+key sits in the kagent namespace rather than being brokered.
+
+```bash
+kubectl --context $KUBE_CONTEXT -n kagent port-forward svc/kagent-ui 8082:8080
+```
+
+then http://127.0.0.1:8082. The `hello` agent in `examples/hello-agent.yaml` is
+a smoke test for the model path.
+
+See [docs/PLAN.md](docs/PLAN.md) for the remaining phases and
+[docs/PREREQUISITES.md](docs/PREREQUISITES.md) for the accounts involved.
 
 ## Repository layout (target)
 

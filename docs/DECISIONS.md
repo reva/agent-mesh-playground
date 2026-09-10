@@ -71,3 +71,16 @@ second controller replica:
 - raising the pool size in the Supabase dashboard is the escape hatch if agent
   count grows; transaction mode on 6543 is the other, at the cost of needing
   pgx's simple protocol
+
+## 2026-09-10 - kagent only, for now
+
+The node pool is one node with 940m CPU and 1130Mi memory allocatable, of which
+system pods take roughly 200m / 138Mi. Requests are 210m/384Mi for kagent,
+100m/128Mi for agentgateway, 100m/192Mi for agentregistry. All three fit only
+with nothing left for agent pods, so only kagent is installed.
+
+Consequence: no gateway to broker the model call, so kagent holds the OpenRouter
+key itself and its ModelConfig points at `https://openrouter.ai/api/v1`.
+`manifests/gateway.yaml` still holds the brokered configuration. Restoring it
+means a bigger node pool, applying that manifest, and pointing the ModelConfig
+back at the in-cluster gateway.

@@ -1,0 +1,12 @@
+config:
+  enableRegistryValidation: "false"
+resources:
+  requests: {cpu: 100m, memory: 192Mi}
+  limits: {cpu: 500m, memory: 512Mi}
+database:
+  postgres:
+    type: external
+    external:
+      secretRef:
+        name: agentregistry-database
+        key: AGENT_REGISTRY_DATABASE_URL
