@@ -29,10 +29,41 @@ same issue whatever the model does.
 Fill `GITHUB_REPO` and `GITHUB_TOKEN` in `.env`, then `./scripts/up.sh`. Both
 empty means no refiner and no CronJob.
 
-The token is a fine-grained PAT on that one repository: Issues read and write,
-Contents read, nothing else. The agent cannot touch code even if something goes
-wrong, and if the model is talked into something the worst it can do is write a
-comment.
+### The token
+
+A fine-grained PAT, made at
+`https://github.com/settings/personal-access-tokens/new`:
+
+| Field | Value |
+|---|---|
+| Resource owner | the account or org that owns the repository |
+| Repository access | Only select repositories, then that one |
+| Issues | Read and write |
+| Contents | Read-only |
+| Metadata | Read-only, mandatory, enabled for you |
+
+Nothing else. Issues write is the comment, Contents read is the file the report
+names. The agent cannot touch code even if something goes wrong, and if the
+model is talked into something the worst it can do is write a comment.
+
+If the repository belongs to an organisation, set the resource owner to that
+organisation, and expect to wait: an org owner has to approve the token when the
+fine-grained PAT policy is on.
+
+One tool is not covered by that grant. `search_code` is absent from GitHub's
+table of endpoints that accept fine-grained tokens, and code search has a
+history of rejecting them. Check before demoing:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $GITHUB_TOKEN" \
+  "https://api.github.com/search/code?q=repo:$GITHUB_REPO+kagent"
+```
+
+403 or 422 means drop `search_code` from the tool list in `agents/refiner.yaml`.
+The agent still reads files with `get_file_contents`, which returns a listing
+when given a directory. A classic PAT with the `repo` scope would fix code
+search and grant write access to every repository you can see, which is a poor
+trade for one tool.
 
 Comments appear as whoever owns the token, so use a machine account if you can.
 Your own name on the agent's comments reads badly on a screen, and the poll
